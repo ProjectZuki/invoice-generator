@@ -325,7 +325,7 @@ class InvoiceGeneratorApp(tk.Tk):
             inv_canvas.drawString(2 * cm, y_position, date.get())
             inv_canvas.drawString(5 * cm, y_position, description.get())
             inv_canvas.drawString(12 * cm, y_position, location.get())
-            inv_canvas.drawString(17 * cm, y_position, rate.get())
+            inv_canvas.drawString(17 * cm, y_position, "$" + rate.get())
 
             # increment totals
             subtotal += float(rate.get())
