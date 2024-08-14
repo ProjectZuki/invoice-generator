@@ -1,0 +1,11 @@
+companyimage_file_name=path/to/company/image.png
+signature_file_name=path/to/signature/image.png
+company_name=NAME
+address=ADDRESS
+city_st_zip=CITY, STATE, ZIP
+phone_no=PHONENO
+email=EMAIL
+customer_name=CLIENT_NAME
+customer_email=CLIENT_EMAIL
+customer_address=CLIENT_ADDRESS
+customer_city=CLIENT CITY, ST, ZIP
