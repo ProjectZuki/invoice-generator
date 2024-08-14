@@ -1,0 +1,4 @@
+files/*
+invoices/*
+config.txt
+last_invoice_number.txt
