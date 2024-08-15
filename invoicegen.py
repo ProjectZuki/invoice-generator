@@ -71,8 +71,8 @@ class InvoiceGeneratorApp(tk.Tk):
         # Create the UI
         self.create_widgets()
 
-        # Ensure the invoice number file exists
-        self.ensure_invoice_number_file()
+        # verify the invoice number file exists
+        self.verify_invoice_number_file()
 
     def load_config(self, file_path):
         """
@@ -367,9 +367,9 @@ class InvoiceGeneratorApp(tk.Tk):
         # Open the PDF in the default viewer
         webbrowser.open(os.path.abspath(pdf_filename))
 
-    def ensure_invoice_number_file(self):
+    def verify_invoice_number_file(self):
         """
-            Ensure the invoice number file exists.
+            verify the invoice number file exists.
 
             Args:
                 None
