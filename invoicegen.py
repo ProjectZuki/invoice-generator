@@ -41,6 +41,7 @@ from reportlab.lib.colors import Color
 import webbrowser
 import datetime
 from datetime import timedelta
+import textwrap
 
 class InvoiceGeneratorApp(tk.Tk):
     def __init__(self):
@@ -62,7 +63,10 @@ class InvoiceGeneratorApp(tk.Tk):
         self.load_config("config.txt")
 
         # set current date
-        self.date = tk.StringVar(value=datetime.date.today().strftime("%d %B %Y"))
+        today = datetime.date.today()
+        self.date = tk.StringVar(value=today.strftime("%d %B %Y"))
+        self.due_date = (today + timedelta(days=15)).strftime("%d %B %Y")
+
         # assume authorized signatory is the company name (self)
         self.authorized_signatory = self.company_name
 
@@ -182,7 +186,13 @@ class InvoiceGeneratorApp(tk.Tk):
         cal.pack(pady=20)
 
         def set_date():
-            self.date.set(cal.get_date())
+            # set invoice date
+            date_str = cal.get_date()
+            date_adj = datetime.datetime.strptime(date_str, "%m/%d/%y")
+            self.date.set(date_adj.strftime("%d %B %Y"))
+
+            # adjust due date
+            self.due_date = (date_adj + timedelta(days=15)).strftime("%d %B %Y")
             top.destroy()
 
         tk.Button(top, text="Set Date", command=set_date).pack(pady=20)
@@ -308,6 +318,7 @@ class InvoiceGeneratorApp(tk.Tk):
 
         subtotal : float = 0
 
+        # print line items
         # light grey color background for every other item for better readability
         light_grey = Color(0.9, 0.9, 0.9)
 
@@ -346,16 +357,26 @@ class InvoiceGeneratorApp(tk.Tk):
         inv_canvas.setStrokeColorRGB(0.8, 0.8, 0.8)
         inv_canvas.line(width - 8 * cm, y_position - 1.5 * cm, width - 2 * cm, y_position - 1.5 * cm)
 
-        due_date = (datetime.date.today() + timedelta(days=15)).strftime("%d %B %Y")
         inv_canvas.setFont("Helvetica", 10)
         inv_canvas.setFont("Helvetica-Bold", 10)
-        inv_canvas.drawRightString(width - 5.5 * cm, y_position - 2 * cm, "Due Date:")
+        inv_canvas.drawRightString(width - 5.7 * cm, y_position - 2 * cm, "Due Date:")
         inv_canvas.setFont("Helvetica", 10)
-        inv_canvas.drawRightString(width - 2.5 * cm, y_position - 2 * cm, f"{due_date}")
+        inv_canvas.drawRightString(width - 2.5 * cm, y_position - 2 * cm, f"{self.due_date}")
 
         # signature
         inv_canvas.drawRightString(width - 2 * cm, 2 * cm, f"Authorized Signatory: "+ self.authorized_signatory.get())
         inv_canvas.drawImage(self.signature_file_name, width - 6 * cm, 2.5 * cm, width=6 * cm, height=2 * cm, mask='auto')
+
+        # add note to the invoice
+        inv_canvas.setFillColorRGB(0.5, 0.5, 0.5)  # Set fill color to light gray
+        inv_canvas.setFont("Helvetica", 10)
+        note_text = f"Your business is greatly appreciated."
+
+        note_lines = textwrap.wrap(note_text, width=90)
+
+        for line in note_lines:
+            inv_canvas.drawString(3 * cm, y_position - 3 * cm, line)
+            y_position -= 0.5 * cm
 
         inv_canvas.showPage()
         inv_canvas.save()
