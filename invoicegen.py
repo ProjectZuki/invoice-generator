@@ -31,8 +31,10 @@ Methods:
 
 # import required libraries
 import os
+import json
+import sqlite3
 import tkinter as tk
-from tkinter import filedialog, messagebox
+from tkinter import messagebox, simpledialog
 from tkcalendar import Calendar
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.units import cm
@@ -42,6 +44,26 @@ import webbrowser
 import datetime
 from datetime import timedelta
 import textwrap
+
+
+CONFIG_KEYS = {
+    "companyimage_file_name",
+    "signature_file_name",
+    "company_name",
+    "address",
+    "city_st_zip",
+    "phone_no",
+    "email",
+    "customer_name",
+    "customer_email",
+    "customer_address",
+    "customer_city",
+}
+
+INVOICE_COUNTER_DB = "invoice_counter.db"
+INVOICE_COUNTER_KEY = "last_invoice_number"
+LEGACY_INVOICE_NUMBER_FILE = "invoice_number.txt"
+DRAFTS_TABLE = "invoice_drafts"
 
 class InvoiceGeneratorApp(tk.Tk):
     def __init__(self):
@@ -59,6 +81,19 @@ class InvoiceGeneratorApp(tk.Tk):
         self.geometry("700x750")
         self.configure(bg='white')
 
+        # define defaults before config loading to avoid missing attributes on invalid config files
+        self.companyimage_file_name = ""
+        self.signature_file_name = ""
+        self.company_name = tk.StringVar(value="")
+        self.address = tk.StringVar(value="")
+        self.city_st_zip = tk.StringVar(value="")
+        self.phone_no = tk.StringVar(value="")
+        self.email = tk.StringVar(value="")
+        self.customer_name = tk.StringVar(value="")
+        self.customer_email = tk.StringVar(value="")
+        self.customer_address = tk.StringVar(value="")
+        self.customer_city = tk.StringVar(value="")
+
         # initialize variables via config file
         self.load_config("config.txt")
 
@@ -69,14 +104,18 @@ class InvoiceGeneratorApp(tk.Tk):
 
         # assume authorized signatory is the company name (self)
         self.authorized_signatory = self.company_name
+        self.next_invoice_number_var = tk.StringVar(value="Invoice #: --")
 
         self.line_items = []  # To store each line item (Description, Qty, Unit Price, Total)
+        self.line_item_window = None
+
+        # initialize persistent invoice counter storage before rendering widgets
+        self.initialize_invoice_counter()
+        self.initialize_drafts_storage()
+        self.refresh_next_invoice_number_label()
 
         # Create the UI
         self.create_widgets()
-
-        # verify the invoice number file exists
-        self.verify_invoice_number_file()
 
     def load_config(self, file_path):
         """
@@ -95,9 +134,23 @@ class InvoiceGeneratorApp(tk.Tk):
 
         # read from config file to set default values
         with open(file_path, 'r') as file:
-            for line in file:
-                key, value = line.strip().split('=', 1)
+            for line_number, line in enumerate(file, start=1):
+                line = line.strip()
+
+                # allow blank lines and comments in config.txt
+                if not line or line.startswith("#"):
+                    continue
+
+                if "=" not in line:
+                    messagebox.showwarning("Config Warning", f"Skipping invalid config line {line_number}: {line}")
+                    continue
+
+                key, value = line.split('=', 1)
+                key = key.strip()
                 value = value.strip()
+
+                if key not in CONFIG_KEYS:
+                    continue
 
                 if key == "companyimage_file_name":
                     self.companyimage_file_name = value
@@ -122,6 +175,63 @@ class InvoiceGeneratorApp(tk.Tk):
                 elif key == "customer_city":
                     self.customer_city = tk.StringVar(value=value)
 
+    def _validate_required_fields(self):
+        """Validate required top-level form fields before invoice generation."""
+        required_fields = {
+            "Company Name": self.company_name.get().strip(),
+            "Address": self.address.get().strip(),
+            "City": self.city_st_zip.get().strip(),
+            "Date": self.date.get().strip(),
+            "Customer Name": self.customer_name.get().strip(),
+            "Phone No": self.phone_no.get().strip(),
+            "Authorized Signatory": self.authorized_signatory.get().strip(),
+        }
+
+        missing_fields = [name for name, value in required_fields.items() if not value]
+        if missing_fields:
+            messagebox.showerror("Error", f"Please fill in all fields: {', '.join(missing_fields)}")
+            return False
+        return True
+
+    def _validate_line_items(self):
+        """Validate and normalize line items, returning parsed rows and subtotal."""
+        parsed_items = []
+        subtotal = 0.0
+
+        for index, item in enumerate(self.line_items, start=1):
+            date, description, location, rate = item
+            row_date = date.get().strip()
+            row_description = description.get().strip()
+            row_location = location.get().strip()
+            row_rate_raw = rate.get().strip()
+
+            # ignore fully empty rows so users can leave an extra blank row in the UI
+            if not row_date and not row_description and not row_location and not row_rate_raw:
+                continue
+
+            if not row_description or not row_rate_raw:
+                messagebox.showerror("Error", f"Line item {index}: Description and Rate are required.")
+                return None, None
+
+            try:
+                row_rate = float(row_rate_raw)
+            except ValueError:
+                messagebox.showerror("Error", f"Line item {index}: Rate must be a valid number.")
+                return None, None
+
+            if row_rate < 0:
+                messagebox.showerror("Error", f"Line item {index}: Rate cannot be negative.")
+                return None, None
+
+            parsed_items.append((row_date, row_description, row_location, row_rate))
+            subtotal += row_rate
+
+        if not parsed_items:
+            messagebox.showerror("Error", "Please add at least one valid line item.")
+            return None, None
+
+        return parsed_items, subtotal
+
     def create_widgets(self):
         """
             Create the user interface widgets for the application.
@@ -134,6 +244,7 @@ class InvoiceGeneratorApp(tk.Tk):
 
         # Company Details
         tk.Label(self, text="Company Details", font=("Arial", 20, "bold"), bg="white", fg="black").pack(pady=10)
+        tk.Label(self, textvariable=self.next_invoice_number_var, font=("Arial", 11, "bold"), bg="white", fg="#555555").pack()
 
         # create labels and entry widgets for inputting company details
         self.create_label_and_entry("Company Name", self.company_name, 80)
@@ -153,6 +264,10 @@ class InvoiceGeneratorApp(tk.Tk):
 
         # button to generate invoice
         tk.Button(self, text="Generate Invoice", command=self.generate_invoice, font=("Arial", 12), bg="black", fg="white").place(x=300, y=640, width=200, height=40)
+
+        # draft controls
+        tk.Button(self, text="Save Draft", command=self.prompt_save_draft, font=("Arial", 11), bg="#444444", fg="white").place(x=50, y=690, width=200, height=35)
+        tk.Button(self, text="Manage Drafts", command=self.open_drafts_manager, font=("Arial", 11), bg="#444444", fg="white").place(x=300, y=690, width=200, height=35)
 
     def create_label_and_entry(self, label_text, text_variable, y_position):
         """
@@ -182,7 +297,8 @@ class InvoiceGeneratorApp(tk.Tk):
         top = tk.Toplevel(self)
         top.geometry("400x400")
 
-        cal = Calendar(top, selectmode='day', year=2024, month=8, day=1)
+        today = datetime.date.today()
+        cal = Calendar(top, selectmode='day', year=today.year, month=today.month, day=today.day)
         cal.pack(pady=20)
 
         def set_date():
@@ -207,11 +323,18 @@ class InvoiceGeneratorApp(tk.Tk):
                 None
         """
 
+        # Reuse the existing line items window if it's already open.
+        if self.line_item_window is not None and self.line_item_window.winfo_exists():
+            self.line_item_window.lift()
+            self.line_item_window.focus_force()
+            return
+
         # create GUI window for entering line items
         self.line_item_window = tk.Toplevel(self)
         self.line_item_window.title("Line Items")
         self.line_item_window.geometry("800x600")
         self.line_item_window.configure(bg='white')
+        self.line_item_window.protocol("WM_DELETE_WINDOW", self.close_line_item_window)
 
         # create labels for line items
         tk.Label(self.line_item_window, text="Date", font=("Arial", 12), bg="white").grid(row=0, column=0, padx=10, pady=10)
@@ -219,8 +342,13 @@ class InvoiceGeneratorApp(tk.Tk):
         tk.Label(self.line_item_window, text="Location", font=("Arial", 12), bg="white").grid(row=0, column=2, padx=10, pady=10)
         tk.Label(self.line_item_window, text="Rate", font=("Arial", 12), bg="white").grid(row=0, column=3, padx=10, pady=10)
 
-        # add initial row for line item
-        self.add_line_item_row()
+        if self.line_items:
+            for row_index, item in enumerate(self.line_items, start=1):
+                date, description, location, rate = item
+                self.render_line_item_row(row_index, date, description, location, rate)
+        else:
+            # add initial row for line item
+            self.add_line_item_row()
 
         # button to add new line item row
         tk.Button(self.line_item_window, text="+ Add Line", command=self.add_line_item_row, font=("Arial", 12), bg="black", fg="white").grid(row=999, column=0, columnspan=4, pady=20)
@@ -234,6 +362,10 @@ class InvoiceGeneratorApp(tk.Tk):
             Returns:
                 None
         """
+        if self.line_item_window is None or not self.line_item_window.winfo_exists():
+            # Avoid stale state updates when the line item window is closed.
+            return
+
         # initialize variables for line item
         row_index = len(self.line_items) + 1
         date = tk.StringVar()
@@ -241,14 +373,278 @@ class InvoiceGeneratorApp(tk.Tk):
         location = tk.StringVar()
         rate = tk.StringVar()
 
+        # append line item to list before rendering
+        self.line_items.append((date, description, location, rate))
+
+        self.render_line_item_row(row_index, date, description, location, rate)
+
+    def render_line_item_row(self, row_index, date, description, location, rate):
+        """Render one line item row in the line item window."""
+        if self.line_item_window is None or not self.line_item_window.winfo_exists():
+            return
+
         # create entry widgets for each line item
         tk.Entry(self.line_item_window, textvariable=date, font=("Arial", 12), width=15).grid(row=row_index, column=0, padx=10, pady=10)
         tk.Entry(self.line_item_window, textvariable=description, font=("Arial", 12), width=30).grid(row=row_index, column=1, padx=10, pady=10)
         tk.Entry(self.line_item_window, textvariable=location, font=("Arial", 12), width=20).grid(row=row_index, column=2, padx=10, pady=10)
         tk.Entry(self.line_item_window, textvariable=rate, font=("Arial", 12), width=10).grid(row=row_index, column=3, padx=10, pady=10)
 
-        # append line item to list
-        self.line_items.append((date, description, location, rate))
+    def cache_line_items_progress(self):
+        """Persist current line-item values in memory for later editing."""
+        sanitized_items = []
+        for row in self.line_items:
+            if not row or len(row) != 4:
+                continue
+
+            date, description, location, rate = row
+            sanitized_items.append(
+                (
+                    tk.StringVar(value=date.get().strip()),
+                    tk.StringVar(value=description.get().strip()),
+                    tk.StringVar(value=location.get().strip()),
+                    tk.StringVar(value=rate.get().strip()),
+                )
+            )
+
+        self.line_items = sanitized_items
+
+    def close_line_item_window(self):
+        """Close line item window and keep in-memory line-item state."""
+        if self.line_item_window is None or not self.line_item_window.winfo_exists():
+            self.line_item_window = None
+            return
+
+        # Save current content before closing to prevent accidental data loss.
+        self.cache_line_items_progress()
+
+        self.line_item_window.destroy()
+        self.line_item_window = None
+
+    def initialize_drafts_storage(self):
+        """Initialize storage for invoice drafts."""
+        try:
+            with sqlite3.connect(INVOICE_COUNTER_DB) as conn:
+                conn.execute(
+                    f"""
+                    CREATE TABLE IF NOT EXISTS {DRAFTS_TABLE} (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        name TEXT NOT NULL UNIQUE,
+                        payload TEXT NOT NULL,
+                        updated_at TEXT NOT NULL
+                    )
+                    """
+                )
+                conn.commit()
+        except sqlite3.Error as exc:
+            messagebox.showerror("Error", f"Failed to initialize drafts storage: {exc}")
+
+    def prompt_save_draft(self):
+        """Prompt for draft name and save current invoice state."""
+        draft_name = simpledialog.askstring("Save Draft", "Enter a draft name:")
+        if not draft_name:
+            return
+
+        draft_name = draft_name.strip()
+        if not draft_name:
+            messagebox.showerror("Error", "Draft name cannot be empty.")
+            return
+
+        self.save_draft(draft_name)
+
+    def save_draft(self, draft_name):
+        """Save current form and line item state to drafts storage."""
+        draft_payload = {
+            "company_name": self.company_name.get().strip(),
+            "address": self.address.get().strip(),
+            "city_st_zip": self.city_st_zip.get().strip(),
+            "phone_no": self.phone_no.get().strip(),
+            "email": self.email.get().strip(),
+            "customer_name": self.customer_name.get().strip(),
+            "customer_email": self.customer_email.get().strip(),
+            "customer_address": self.customer_address.get().strip(),
+            "customer_city": self.customer_city.get().strip(),
+            "date": self.date.get().strip(),
+            "due_date": self.due_date,
+            "authorized_signatory": self.authorized_signatory.get().strip(),
+            "line_items": [
+                {
+                    "date": date.get().strip(),
+                    "description": description.get().strip(),
+                    "location": location.get().strip(),
+                    "rate": rate.get().strip(),
+                }
+                for date, description, location, rate in self.line_items
+            ],
+        }
+
+        now_iso = datetime.datetime.now().isoformat(timespec="seconds")
+
+        try:
+            with sqlite3.connect(INVOICE_COUNTER_DB) as conn:
+                conn.execute(
+                    f"""
+                    INSERT INTO {DRAFTS_TABLE} (name, payload, updated_at)
+                    VALUES (?, ?, ?)
+                    ON CONFLICT(name) DO UPDATE SET
+                        payload = excluded.payload,
+                        updated_at = excluded.updated_at
+                    """,
+                    (draft_name, json.dumps(draft_payload), now_iso),
+                )
+                conn.commit()
+            messagebox.showinfo("Success", f"Draft '{draft_name}' saved.")
+        except sqlite3.Error as exc:
+            messagebox.showerror("Error", f"Failed to save draft: {exc}")
+
+    def open_drafts_manager(self):
+        """Open draft manager window for loading and deleting drafts."""
+        manager = tk.Toplevel(self)
+        manager.title("Drafts")
+        manager.geometry("500x400")
+        manager.configure(bg="white")
+
+        tk.Label(manager, text="Saved Drafts", font=("Arial", 14, "bold"), bg="white", fg="black").pack(pady=10)
+
+        listbox = tk.Listbox(manager, font=("Arial", 11), width=60, height=12)
+        listbox.pack(padx=10, pady=10)
+
+        draft_names = []
+
+        def refresh_drafts_list():
+            listbox.delete(0, tk.END)
+            draft_names.clear()
+
+            for name, updated_at in self.get_saved_drafts():
+                draft_names.append(name)
+                listbox.insert(tk.END, f"{name}  (updated: {updated_at})")
+
+            if not draft_names:
+                listbox.insert(tk.END, "No drafts found")
+
+        def get_selected_draft_name():
+            if not listbox.curselection():
+                return None
+            selected_index = listbox.curselection()[0]
+            if selected_index >= len(draft_names):
+                return None
+            return draft_names[selected_index]
+
+        def load_selected_draft():
+            selected_name = get_selected_draft_name()
+            if not selected_name:
+                messagebox.showerror("Error", "Select a draft to load.")
+                return
+
+            if self.load_draft(selected_name):
+                messagebox.showinfo("Success", f"Draft '{selected_name}' loaded.")
+                manager.destroy()
+
+        def delete_selected_draft():
+            selected_name = get_selected_draft_name()
+            if not selected_name:
+                messagebox.showerror("Error", "Select a draft to delete.")
+                return
+
+            confirmed = messagebox.askyesno("Confirm Delete", f"Delete draft '{selected_name}'?")
+            if not confirmed:
+                return
+
+            if self.delete_draft(selected_name):
+                refresh_drafts_list()
+
+        button_row = tk.Frame(manager, bg="white")
+        button_row.pack(pady=10)
+
+        tk.Button(button_row, text="Load", command=load_selected_draft, width=12, bg="#333333", fg="white").grid(row=0, column=0, padx=5)
+        tk.Button(button_row, text="Delete", command=delete_selected_draft, width=12, bg="#7a1f1f", fg="white").grid(row=0, column=1, padx=5)
+        tk.Button(button_row, text="Refresh", command=refresh_drafts_list, width=12, bg="#555555", fg="white").grid(row=0, column=2, padx=5)
+
+        refresh_drafts_list()
+
+    def get_saved_drafts(self):
+        """Return a list of saved draft names and timestamps."""
+        try:
+            with sqlite3.connect(INVOICE_COUNTER_DB) as conn:
+                rows = conn.execute(
+                    f"SELECT name, updated_at FROM {DRAFTS_TABLE} ORDER BY updated_at DESC"
+                ).fetchall()
+                return rows
+        except sqlite3.Error as exc:
+            messagebox.showerror("Error", f"Failed to fetch drafts: {exc}")
+            return []
+
+    def load_draft(self, draft_name):
+        """Load draft values into the current form and line item state."""
+        try:
+            with sqlite3.connect(INVOICE_COUNTER_DB) as conn:
+                row = conn.execute(
+                    f"SELECT payload FROM {DRAFTS_TABLE} WHERE name = ?",
+                    (draft_name,),
+                ).fetchone()
+        except sqlite3.Error as exc:
+            messagebox.showerror("Error", f"Failed to load draft: {exc}")
+            return False
+
+        if not row:
+            messagebox.showerror("Error", f"Draft '{draft_name}' not found.")
+            return False
+
+        try:
+            payload = json.loads(row[0])
+        except (TypeError, ValueError):
+            messagebox.showerror("Error", "Draft payload is invalid.")
+            return False
+
+        self.company_name.set(payload.get("company_name", ""))
+        self.address.set(payload.get("address", ""))
+        self.city_st_zip.set(payload.get("city_st_zip", ""))
+        self.phone_no.set(payload.get("phone_no", ""))
+        self.email.set(payload.get("email", ""))
+        self.customer_name.set(payload.get("customer_name", ""))
+        self.customer_email.set(payload.get("customer_email", ""))
+        self.customer_address.set(payload.get("customer_address", ""))
+        self.customer_city.set(payload.get("customer_city", ""))
+        self.date.set(payload.get("date", ""))
+        self.due_date = payload.get("due_date", self.due_date)
+        self.authorized_signatory.set(payload.get("authorized_signatory", ""))
+
+        self.line_items = []
+        for item in payload.get("line_items", []):
+            self.line_items.append(
+                (
+                    tk.StringVar(value=item.get("date", "")),
+                    tk.StringVar(value=item.get("description", "")),
+                    tk.StringVar(value=item.get("location", "")),
+                    tk.StringVar(value=item.get("rate", "")),
+                )
+            )
+
+        # if line items window is open, rebuild it with loaded rows
+        if self.line_item_window is not None and self.line_item_window.winfo_exists():
+            self.line_item_window.destroy()
+            self.open_line_item_window()
+
+        return True
+
+    def delete_draft(self, draft_name):
+        """Delete a draft by name."""
+        try:
+            with sqlite3.connect(INVOICE_COUNTER_DB) as conn:
+                result = conn.execute(
+                    f"DELETE FROM {DRAFTS_TABLE} WHERE name = ?",
+                    (draft_name,),
+                )
+                conn.commit()
+
+            if result.rowcount == 0:
+                messagebox.showerror("Error", f"Draft '{draft_name}' not found.")
+                return False
+
+            messagebox.showinfo("Success", f"Draft '{draft_name}' deleted.")
+            return True
+        except sqlite3.Error as exc:
+            messagebox.showerror("Error", f"Failed to delete draft: {exc}")
+            return False
 
     def generate_invoice(self):
         """
@@ -260,13 +656,29 @@ class InvoiceGeneratorApp(tk.Tk):
                 None
         """
 
-        # Check if all fields are filled, return error if not
-        if not self.company_name.get() or not self.address.get() or not self.city_st_zip.get() or not self.date.get() or not self.customer_name.get() or not self.phone_no.get() or not self.authorized_signatory.get():
-            messagebox.showerror("Error", "Please fill in all fields.")
+        if not self._validate_required_fields():
             return
 
-        # get next invoice number from file, or create file if it doesn't exist
+        parsed_items, subtotal = self._validate_line_items()
+        if parsed_items is None:
+            return
+
+        # ensure output directory exists
+        os.makedirs("invoices", exist_ok=True)
+
+        if self.companyimage_file_name and not os.path.isfile(self.companyimage_file_name):
+            messagebox.showerror("Error", f"Company logo not found: {self.companyimage_file_name}")
+            return
+
+        if self.signature_file_name and not os.path.isfile(self.signature_file_name):
+            messagebox.showerror("Error", f"Signature image not found: {self.signature_file_name}")
+            return
+
+        # reserve the next invoice number from persistent counter storage
         invoice_number = self.get_next_invoice_number()
+        if invoice_number <= 0:
+            return
+
         pdf_filename = f"invoices/Invoice_{invoice_number}.pdf"
 
         # generate PDF to begin filling contents
@@ -274,7 +686,8 @@ class InvoiceGeneratorApp(tk.Tk):
         width, height = A4
 
         # draw the logo at the top left
-        inv_canvas.drawImage(self.companyimage_file_name, 2 * cm, height - 3.5 * cm, width=4 * cm, height=2 * cm)
+        if self.companyimage_file_name:
+            inv_canvas.drawImage(self.companyimage_file_name, 2 * cm, height - 3.5 * cm, width=4 * cm, height=2 * cm)
 
         # company details next to the logo
         inv_canvas.setFont("Helvetica", 10)
@@ -316,14 +729,17 @@ class InvoiceGeneratorApp(tk.Tk):
 
         y_position = height - 9.5 * cm
 
-        subtotal : float = 0
-
         # print line items
         # light grey color background for every other item for better readability
         light_grey = Color(0.9, 0.9, 0.9)
 
-        for index, item in enumerate(self.line_items):
-            date, description, location, rate = item
+        for index, item in enumerate(parsed_items):
+            row_date, row_description, row_location, row_rate = item
+
+            # keep rows from colliding with totals/signature section
+            if y_position < 8 * cm:
+                inv_canvas.showPage()
+                y_position = height - 3 * cm
 
             # check if the index is even to set the light grey background
             if index % 2 != 0:
@@ -333,13 +749,10 @@ class InvoiceGeneratorApp(tk.Tk):
             # reset to default fill color (black) for text
             inv_canvas.setFillColor(Color(0, 0, 0))
 
-            inv_canvas.drawString(2 * cm, y_position, date.get())
-            inv_canvas.drawString(5 * cm, y_position, description.get())
-            inv_canvas.drawString(12 * cm, y_position, location.get())
-            inv_canvas.drawString(17 * cm, y_position, "$" + rate.get())
-
-            # increment totals
-            subtotal += float(rate.get())
+            inv_canvas.drawString(2 * cm, y_position, row_date)
+            inv_canvas.drawString(5 * cm, y_position, row_description)
+            inv_canvas.drawString(12 * cm, y_position, row_location)
+            inv_canvas.drawString(17 * cm, y_position, f"${row_rate:.2f}")
             
             # update y position for next line item
             y_position -= 1 * cm
@@ -365,7 +778,8 @@ class InvoiceGeneratorApp(tk.Tk):
 
         # signature
         inv_canvas.drawRightString(width - 2 * cm, 2 * cm, f"Authorized Signatory: "+ self.authorized_signatory.get())
-        inv_canvas.drawImage(self.signature_file_name, width - 6 * cm, 2.5 * cm, width=6 * cm, height=2 * cm, mask='auto')
+        if self.signature_file_name:
+            inv_canvas.drawImage(self.signature_file_name, width - 6 * cm, 2.5 * cm, width=6 * cm, height=2 * cm, mask='auto')
 
         # add note to the invoice
         inv_canvas.setFillColorRGB(0.5, 0.5, 0.5)  # Set fill color to light gray
@@ -388,33 +802,117 @@ class InvoiceGeneratorApp(tk.Tk):
         # Open the PDF in the default viewer
         webbrowser.open(os.path.abspath(pdf_filename))
 
-    def verify_invoice_number_file(self):
+    def refresh_next_invoice_number_label(self):
+        """Update UI label with the upcoming invoice number."""
+        current_invoice_number = self.get_current_invoice_number()
+        if current_invoice_number is None:
+            self.next_invoice_number_var.set("Invoice #: unavailable")
+            return
+        self.next_invoice_number_var.set(f"Invoice #: {current_invoice_number + 1}")
+
+    def initialize_invoice_counter(self):
         """
-            verify the invoice number file exists.
+            Initialize SQLite storage for invoice number tracking.
+            If first run, migrate the value from legacy invoice_number.txt.
 
             Args:
                 None
             Returns:
                 None
         """
-        if not os.path.exists("invoice_number.txt"):
-            with open("invoice_number.txt", "w") as f:
-                f.write("0")
+        db_path = INVOICE_COUNTER_DB
+
+        try:
+            with sqlite3.connect(db_path) as conn:
+                conn.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS app_state (
+                        key TEXT PRIMARY KEY,
+                        value INTEGER NOT NULL
+                    )
+                    """
+                )
+
+                row = conn.execute(
+                    "SELECT value FROM app_state WHERE key = ?",
+                    (INVOICE_COUNTER_KEY,),
+                ).fetchone()
+
+                if row is None:
+                    legacy_value = self._read_legacy_invoice_number()
+                    conn.execute(
+                        "INSERT INTO app_state (key, value) VALUES (?, ?)",
+                        (INVOICE_COUNTER_KEY, legacy_value),
+                    )
+                    conn.commit()
+        except sqlite3.Error as exc:
+            messagebox.showerror("Error", f"Failed to initialize invoice counter database: {exc}")
+
+    def _read_legacy_invoice_number(self):
+        """Read legacy invoice_number.txt value for one-time migration."""
+        if not os.path.exists(LEGACY_INVOICE_NUMBER_FILE):
+            return 0
+
+        try:
+            with open(LEGACY_INVOICE_NUMBER_FILE, "r") as file:
+                raw_value = file.read().strip()
+                parsed = int(raw_value) if raw_value else 0
+                return parsed if parsed >= 0 else 0
+        except (ValueError, OSError):
+            return 0
 
     def get_next_invoice_number(self):
         """
-            Get the next invoice number from the invoice number file.
+            Get the next invoice number from SQLite persistent storage.
 
             Args:
                 None
             Returns:
                 int: The next invoice number.
         """
-        with open("invoice_number.txt", "r+") as f:
-            number = int(f.read().strip())
-            f.seek(0)
-            f.write(str(number + 1))
-        return number + 1
+        db_path = INVOICE_COUNTER_DB
+
+        try:
+            with sqlite3.connect(db_path, timeout=10) as conn:
+                conn.execute("BEGIN IMMEDIATE")
+                row = conn.execute(
+                    "SELECT value FROM app_state WHERE key = ?",
+                    (INVOICE_COUNTER_KEY,),
+                ).fetchone()
+
+                current_value = int(row[0]) if row else 0
+                next_value = current_value + 1
+
+                if row is None:
+                    conn.execute(
+                        "INSERT INTO app_state (key, value) VALUES (?, ?)",
+                        (INVOICE_COUNTER_KEY, next_value),
+                    )
+                else:
+                    conn.execute(
+                        "UPDATE app_state SET value = ? WHERE key = ?",
+                        (next_value, INVOICE_COUNTER_KEY),
+                    )
+
+                conn.commit()
+                return next_value
+        except sqlite3.Error as exc:
+            messagebox.showerror("Error", f"Failed to get next invoice number: {exc}")
+            return 0
+
+    def get_current_invoice_number(self):
+        """Return the last used invoice number from SQLite storage."""
+        db_path = INVOICE_COUNTER_DB
+
+        try:
+            with sqlite3.connect(db_path) as conn:
+                row = conn.execute(
+                    "SELECT value FROM app_state WHERE key = ?",
+                    (INVOICE_COUNTER_KEY,),
+                ).fetchone()
+                return int(row[0]) if row else 0
+        except sqlite3.Error:
+            return None
 
 
 if __name__ == "__main__":

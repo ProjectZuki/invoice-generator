@@ -23,8 +23,10 @@ _**Solely because I hate paying for QuickBooks.**_
 - **Customer Information**: Client details such as name, address, and phone number.
 - **Date Selection**: Utilizes calendar widget for date input (if different from default current date).
 - **Line Items**: Add multiple line items with details for date, description, location, and rate.
+- **Draft Management**: Save invoice drafts, load saved drafts, and delete drafts from the draft manager.
 - **Default Values**: Predefined company and customer information to save time, see step 4 of [Installation](#installation).
 - **Customization**: Company log utilized is located in `files/companyimage.png`.
+- **Invoice Number Tracking**: Uses SQLite-backed persistent counters with one-time migration from `invoice_number.txt`.
 - **A4 PDF Format**: PDFs are created in standard A4 ~~wagyu steak~~ PDF format.
 
 ## Requirements
@@ -58,9 +60,11 @@ python invoicegen.py
 2. Input company and client information (using config.txt file). The information should be pre-loaded but open to modification.
 3. Add line items:
     - To add line items, click `+ Add Line` button to add line items to the invoice. When finished, click `Generate Invoice`.
-4. After filling the required information, clicking `Generate Invoice` will generate an A4 PDF invoice
+    - Closing the line item window automatically keeps your current line item state in memory so you can return without recreating rows.
+4. Use `Save Draft` to save in-progress invoice data and `Manage Drafts` to load or delete drafts.
+5. After filling the required information, clicking `Generate Invoice` will generate an A4 PDF invoice
 saved to the directory `invoices/`
-5. The invoice will automatically open for viewing.
+6. The invoice will automatically open for viewing.
 
 ## File Structure
 
@@ -68,8 +72,9 @@ saved to the directory `invoices/`
 ├── files/
 │   ├── companyimage.png         # Default company logo image
 │   └── signature.png            # Default signature image
-├── invoice_generator.py         # Main application script
-├── invoice_number.txt           # Keeps track of the last invoice number
+├── invoicegen.py                # Main application script
+├── invoice_counter.db           # SQLite storage for invoice counters and drafts (created at runtime)
+├── invoice_number.txt           # Legacy counter file used for one-time migration
 ├── README.md                    # Project documentation
 └── config.txt                   # Configuration file for default values
 ```
