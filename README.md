@@ -25,7 +25,7 @@ _**Solely because I hate paying for QuickBooks.**_
 - **Line Items**: Add multiple line items with details for date, description, location, and rate.
 - **Draft Management**: Save invoice drafts, load saved drafts, and delete drafts from the draft manager.
 - **Default Values**: Predefined company and customer information to save time, see step 4 of [Installation](#installation).
-- **Customization**: Company log utilized is located in `files/companyimage.png`.
+- **Customization**: Company logo utilized is located in `files/companyimage.png`.
 - **Invoice Number Tracking**: Uses SQLite-backed persistent counters with one-time migration from `invoice_number.txt`.
 - **A4 PDF Format**: PDFs are created in standard A4 ~~wagyu steak~~ PDF format.
 
@@ -63,8 +63,10 @@ python invoicegen.py
     - Closing the line item window automatically keeps your current line item state in memory so you can return without recreating rows.
 4. Use `Save Draft` to save in-progress invoice data and `Manage Drafts` to load or delete drafts.
 5. After filling the required information, clicking `Generate Invoice` will generate an A4 PDF invoice
-saved to the directory `invoices/`
+   saved to the directory `invoices/`
 6. The invoice will automatically open for viewing.
+
+Note: SQLite data is stored per user under `%LOCALAPPDATA%/invoice-generator/invoice_counter.db`, not in the repository.
 
 ## File Structure
 
@@ -73,8 +75,7 @@ saved to the directory `invoices/`
 │   ├── companyimage.png         # Default company logo image
 │   └── signature.png            # Default signature image
 ├── invoicegen.py                # Main application script
-├── invoice_counter.db           # SQLite storage for invoice counters and drafts (created at runtime)
-├── invoice_number.txt           # Legacy counter file used for one-time migration
+├── invoice_number.txt           # Optional legacy counter file used for one-time migration (if present)
 ├── README.md                    # Project documentation
 └── config.txt                   # Configuration file for default values
 ```

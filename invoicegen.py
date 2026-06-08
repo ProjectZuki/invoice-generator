@@ -64,6 +64,10 @@ INVOICE_COUNTER_DB = "invoice_counter.db"
 INVOICE_COUNTER_KEY = "last_invoice_number"
 LEGACY_INVOICE_NUMBER_FILE = "invoice_number.txt"
 DRAFTS_TABLE = "invoice_drafts"
+APP_DATA_DIR = os.path.join(
+    os.getenv("LOCALAPPDATA", os.path.expanduser("~")),
+    "invoice-generator",
+)
 
 class InvoiceGeneratorApp(tk.Tk):
     def __init__(self):
@@ -102,8 +106,8 @@ class InvoiceGeneratorApp(tk.Tk):
         self.date = tk.StringVar(value=today.strftime("%d %B %Y"))
         self.due_date = (today + timedelta(days=15)).strftime("%d %B %Y")
 
-        # assume authorized signatory is the company name (self)
-        self.authorized_signatory = self.company_name
+        # default signatory to company name, but keep it as an independent field
+        self.authorized_signatory = tk.StringVar(value=self.company_name.get())
         self.next_invoice_number_var = tk.StringVar(value="Invoice #: --")
 
         self.line_items = []  # To store each line item (Description, Qty, Unit Price, Total)
@@ -423,7 +427,7 @@ class InvoiceGeneratorApp(tk.Tk):
     def initialize_drafts_storage(self):
         """Initialize storage for invoice drafts."""
         try:
-            with sqlite3.connect(INVOICE_COUNTER_DB) as conn:
+            with self._connect_db() as conn:
                 conn.execute(
                     f"""
                     CREATE TABLE IF NOT EXISTS {DRAFTS_TABLE} (
@@ -480,7 +484,7 @@ class InvoiceGeneratorApp(tk.Tk):
         now_iso = datetime.datetime.now().isoformat(timespec="seconds")
 
         try:
-            with sqlite3.connect(INVOICE_COUNTER_DB) as conn:
+            with self._connect_db() as conn:
                 conn.execute(
                     f"""
                     INSERT INTO {DRAFTS_TABLE} (name, payload, updated_at)
@@ -564,7 +568,7 @@ class InvoiceGeneratorApp(tk.Tk):
     def get_saved_drafts(self):
         """Return a list of saved draft names and timestamps."""
         try:
-            with sqlite3.connect(INVOICE_COUNTER_DB) as conn:
+            with self._connect_db() as conn:
                 rows = conn.execute(
                     f"SELECT name, updated_at FROM {DRAFTS_TABLE} ORDER BY updated_at DESC"
                 ).fetchall()
@@ -576,7 +580,7 @@ class InvoiceGeneratorApp(tk.Tk):
     def load_draft(self, draft_name):
         """Load draft values into the current form and line item state."""
         try:
-            with sqlite3.connect(INVOICE_COUNTER_DB) as conn:
+            with self._connect_db() as conn:
                 row = conn.execute(
                     f"SELECT payload FROM {DRAFTS_TABLE} WHERE name = ?",
                     (draft_name,),
@@ -629,7 +633,7 @@ class InvoiceGeneratorApp(tk.Tk):
     def delete_draft(self, draft_name):
         """Delete a draft by name."""
         try:
-            with sqlite3.connect(INVOICE_COUNTER_DB) as conn:
+            with self._connect_db() as conn:
                 result = conn.execute(
                     f"DELETE FROM {DRAFTS_TABLE} WHERE name = ?",
                     (draft_name,),
@@ -722,10 +726,7 @@ class InvoiceGeneratorApp(tk.Tk):
         inv_canvas.setStrokeColorRGB(0.8, 0.8, 0.8)  # Set stroke color to light gray
         inv_canvas.line(2 * cm, height - 8 * cm, width - 2 * cm, height - 8 * cm)
 
-        inv_canvas.drawString(2 * cm, height - 8.5 * cm, "Date")
-        inv_canvas.drawString(5 * cm, height - 8.5 * cm, "Description")
-        inv_canvas.drawString(12 * cm, height - 8.5 * cm, "Location")
-        inv_canvas.drawString(17 * cm, height - 8.5 * cm, "Rate")
+        self._draw_line_items_header(inv_canvas, width, height)
 
         y_position = height - 9.5 * cm
 
@@ -739,7 +740,8 @@ class InvoiceGeneratorApp(tk.Tk):
             # keep rows from colliding with totals/signature section
             if y_position < 8 * cm:
                 inv_canvas.showPage()
-                y_position = height - 3 * cm
+                self._draw_line_items_header(inv_canvas, width, height)
+                y_position = height - 9.5 * cm
 
             # check if the index is even to set the light grey background
             if index % 2 != 0:
@@ -792,7 +794,6 @@ class InvoiceGeneratorApp(tk.Tk):
             inv_canvas.drawString(3 * cm, y_position - 3 * cm, line)
             y_position -= 0.5 * cm
 
-        inv_canvas.showPage()
         inv_canvas.save()
 
         messagebox.showinfo("Success", f"Invoice generated successfully and saved as {pdf_filename}.")
@@ -820,10 +821,8 @@ class InvoiceGeneratorApp(tk.Tk):
             Returns:
                 None
         """
-        db_path = INVOICE_COUNTER_DB
-
         try:
-            with sqlite3.connect(db_path) as conn:
+            with self._connect_db() as conn:
                 conn.execute(
                     """
                     CREATE TABLE IF NOT EXISTS app_state (
@@ -870,10 +869,8 @@ class InvoiceGeneratorApp(tk.Tk):
             Returns:
                 int: The next invoice number.
         """
-        db_path = INVOICE_COUNTER_DB
-
         try:
-            with sqlite3.connect(db_path, timeout=10) as conn:
+            with self._connect_db(timeout=10) as conn:
                 conn.execute("BEGIN IMMEDIATE")
                 row = conn.execute(
                     "SELECT value FROM app_state WHERE key = ?",
@@ -902,10 +899,8 @@ class InvoiceGeneratorApp(tk.Tk):
 
     def get_current_invoice_number(self):
         """Return the last used invoice number from SQLite storage."""
-        db_path = INVOICE_COUNTER_DB
-
         try:
-            with sqlite3.connect(db_path) as conn:
+            with self._connect_db() as conn:
                 row = conn.execute(
                     "SELECT value FROM app_state WHERE key = ?",
                     (INVOICE_COUNTER_KEY,),
@@ -913,6 +908,26 @@ class InvoiceGeneratorApp(tk.Tk):
                 return int(row[0]) if row else 0
         except sqlite3.Error:
             return None
+
+    def _get_db_path(self):
+        """Return the per-user SQLite path for counters and drafts."""
+        return os.path.join(APP_DATA_DIR, INVOICE_COUNTER_DB)
+
+    def _connect_db(self, timeout=5):
+        """Create a SQLite connection after ensuring the parent directory exists."""
+        os.makedirs(APP_DATA_DIR, exist_ok=True)
+        return sqlite3.connect(self._get_db_path(), timeout=timeout)
+
+    def _draw_line_items_header(self, inv_canvas, width, height):
+        """Draw line-item table header and separator line for the active page."""
+        inv_canvas.setFont("Helvetica", 10)
+        inv_canvas.setFillColorRGB(0, 0, 0)
+        inv_canvas.setStrokeColorRGB(0.8, 0.8, 0.8)
+        inv_canvas.line(2 * cm, height - 8 * cm, width - 2 * cm, height - 8 * cm)
+        inv_canvas.drawString(2 * cm, height - 8.5 * cm, "Date")
+        inv_canvas.drawString(5 * cm, height - 8.5 * cm, "Description")
+        inv_canvas.drawString(12 * cm, height - 8.5 * cm, "Location")
+        inv_canvas.drawString(17 * cm, height - 8.5 * cm, "Rate")
 
 
 if __name__ == "__main__":
