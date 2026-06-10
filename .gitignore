@@ -2,3 +2,4 @@ files/*
 invoices/*
 config.txt
 invoice_number.txt
+invoice_counter.db
