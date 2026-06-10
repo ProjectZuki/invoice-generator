@@ -62,6 +62,7 @@ CONFIG_KEYS = {
 
 INVOICE_COUNTER_DB = "invoice_counter.db"
 INVOICE_COUNTER_KEY = "last_invoice_number"
+THEME_MODE_KEY = "theme_mode"
 LEGACY_INVOICE_NUMBER_FILE = "invoice_number.txt"
 DRAFTS_TABLE = "invoice_drafts"
 
@@ -79,7 +80,44 @@ class InvoiceGeneratorApp(tk.Tk):
         # set title, and GUI of app window
         self.title("Invoice Generator")
         self.geometry("700x750")
-        self.configure(bg='white')
+
+        self.themes = {
+            "dark": {
+                "bg": "#1b1d24",
+                "panel_bg": "#262a35",
+                "fg": "#e8ecf4",
+                "muted_fg": "#a6afc0",
+                "entry_bg": "#2f3442",
+                "entry_fg": "#f2f5fb",
+                "button_bg": "#3b4254",
+                "button_fg": "#f2f5fb",
+                "accent_bg": "#5aa9ff",
+                "accent_fg": "#0f1420",
+                "danger_bg": "#b24a4a",
+                "danger_active_bg": "#d65c5c",
+                "accent_active_bg": "#83bfff",
+                "border": "#434a5f",
+            },
+            "light": {
+                "bg": "#f4f7fb",
+                "panel_bg": "#ffffff",
+                "fg": "#1d2532",
+                "muted_fg": "#556179",
+                "entry_bg": "#ffffff",
+                "entry_fg": "#111827",
+                "button_bg": "#d9e1f0",
+                "button_fg": "#172033",
+                "accent_bg": "#1f6feb",
+                "accent_fg": "#ffffff",
+                "danger_bg": "#c73a3a",
+                "danger_active_bg": "#df5a5a",
+                "accent_active_bg": "#4687ee",
+                "border": "#b8c2d6",
+            },
+        }
+        self.theme_mode = "dark"
+        self.theme = self.themes[self.theme_mode]
+        self.configure(bg=self.theme["bg"])
 
         # define defaults before config loading to avoid missing attributes on invalid config files
         self.companyimage_file_name = ""
@@ -108,9 +146,15 @@ class InvoiceGeneratorApp(tk.Tk):
 
         self.line_items = []  # To store each line item (Description, Qty, Unit Price, Total)
         self.line_item_window = None
+        self.drafts_manager_window = None
+        self.date_window = None
+        self.theme_toggle_var = tk.StringVar(value="")
 
         # initialize persistent invoice counter storage before rendering widgets
         self.initialize_invoice_counter()
+        self.theme_mode = self.get_saved_theme_mode()
+        self.theme = self.themes[self.theme_mode]
+        self.configure(bg=self.theme["bg"])
         self.initialize_drafts_storage()
         self.refresh_next_invoice_number_label()
 
@@ -243,8 +287,36 @@ class InvoiceGeneratorApp(tk.Tk):
         """
 
         # Company Details
-        tk.Label(self, text="Company Details", font=("Arial", 20, "bold"), bg="white", fg="black").pack(pady=10)
-        tk.Label(self, textvariable=self.next_invoice_number_var, font=("Arial", 11, "bold"), bg="white", fg="#555555").pack()
+        tk.Label(
+            self,
+            text="Company Details",
+            font=("Arial", 20, "bold"),
+            bg=self.theme["bg"],
+            fg=self.theme["fg"],
+        ).pack(pady=10)
+        tk.Label(
+            self,
+            textvariable=self.next_invoice_number_var,
+            font=("Arial", 11, "bold"),
+            bg=self.theme["bg"],
+            fg=self.theme["muted_fg"],
+        ).pack()
+
+        theme_button = tk.Button(
+            self,
+            textvariable=self.theme_toggle_var,
+            command=self.toggle_theme,
+            font=("Arial", 12, "bold"),
+            width=3,
+            bg=self.theme["button_bg"],
+            fg=self.theme["button_fg"],
+            activebackground=self.theme["accent_bg"],
+            activeforeground=self.theme["accent_fg"],
+            relief="flat",
+        )
+        theme_button.theme_role = "default"
+        theme_button.place(x=640, y=10, width=45, height=30)
+        self.refresh_theme_toggle_icon()
 
         # create labels and entry widgets for inputting company details
         self.create_label_and_entry("Company Name", self.company_name, 80)
@@ -255,19 +327,92 @@ class InvoiceGeneratorApp(tk.Tk):
         self.create_label_and_entry("Authorized Signatory", self.authorized_signatory, 500)
 
         # client details
-        tk.Label(self, text="Date", font=("Arial", 12), bg="white", fg="black").place(x=50, y=320)
-        tk.Entry(self, textvariable=self.date, font=("Arial", 12)).place(x=250, y=320, width=300, height=30)
-        tk.Button(self, text="Select Date", font=("Arial", 12), command=self.select_date).place(x=570, y=320)
+        tk.Label(
+            self,
+            text="Date",
+            font=("Arial", 12),
+            bg=self.theme["bg"],
+            fg=self.theme["fg"],
+        ).place(x=50, y=320)
+        tk.Entry(
+            self,
+            textvariable=self.date,
+            font=("Arial", 12),
+            bg=self.theme["entry_bg"],
+            fg=self.theme["entry_fg"],
+            insertbackground=self.theme["entry_fg"],
+            relief="flat",
+        ).place(x=250, y=320, width=300, height=30)
+        tk.Button(
+            self,
+            text="Select Date",
+            font=("Arial", 12),
+            command=self.select_date,
+            bg=self.theme["button_bg"],
+            fg=self.theme["button_fg"],
+            activebackground=self.theme["accent_bg"],
+            activeforeground=self.theme["accent_fg"],
+            relief="flat",
+        ).place(x=570, y=320)
 
         # option to enter line items
-        tk.Button(self, text="Enter Line Items", command=self.open_line_item_window, font=("Arial", 12), bg="black", fg="white").place(x=50, y=640, width=200, height=40)
+        enter_line_items_button = tk.Button(
+            self,
+            text="Enter Line Items",
+            command=self.open_line_item_window,
+            font=("Arial", 12),
+            bg=self.theme["button_bg"],
+            fg=self.theme["button_fg"],
+            activebackground=self.theme["accent_bg"],
+            activeforeground=self.theme["accent_fg"],
+            relief="flat",
+        )
+        enter_line_items_button.theme_role = "default"
+        enter_line_items_button.place(x=50, y=640, width=200, height=40)
 
         # button to generate invoice
-        tk.Button(self, text="Generate Invoice", command=self.generate_invoice, font=("Arial", 12), bg="black", fg="white").place(x=300, y=640, width=200, height=40)
+        generate_button = tk.Button(
+            self,
+            text="Generate Invoice",
+            command=self.generate_invoice,
+            font=("Arial", 12),
+            bg=self.theme["accent_bg"],
+            fg=self.theme["accent_fg"],
+            activebackground=self.theme["accent_active_bg"],
+            activeforeground=self.theme["accent_fg"],
+            relief="flat",
+        )
+        generate_button.theme_role = "accent"
+        generate_button.place(x=300, y=640, width=200, height=40)
 
         # draft controls
-        tk.Button(self, text="Save Draft", command=self.prompt_save_draft, font=("Arial", 11), bg="#444444", fg="white").place(x=50, y=690, width=200, height=35)
-        tk.Button(self, text="Manage Drafts", command=self.open_drafts_manager, font=("Arial", 11), bg="#444444", fg="white").place(x=300, y=690, width=200, height=35)
+        save_draft_button = tk.Button(
+            self,
+            text="Save Draft",
+            command=self.prompt_save_draft,
+            font=("Arial", 11),
+            bg=self.theme["button_bg"],
+            fg=self.theme["button_fg"],
+            activebackground=self.theme["accent_bg"],
+            activeforeground=self.theme["accent_fg"],
+            relief="flat",
+        )
+        save_draft_button.theme_role = "default"
+        save_draft_button.place(x=50, y=690, width=200, height=35)
+
+        manage_drafts_button = tk.Button(
+            self,
+            text="Manage Drafts",
+            command=self.open_drafts_manager,
+            font=("Arial", 11),
+            bg=self.theme["button_bg"],
+            fg=self.theme["button_fg"],
+            activebackground=self.theme["accent_bg"],
+            activeforeground=self.theme["accent_fg"],
+            relief="flat",
+        )
+        manage_drafts_button.theme_role = "default"
+        manage_drafts_button.place(x=300, y=690, width=200, height=35)
 
     def create_label_and_entry(self, label_text, text_variable, y_position):
         """
@@ -282,8 +427,22 @@ class InvoiceGeneratorApp(tk.Tk):
         """
 
         # create label and entry widgets
-        tk.Label(self, text=label_text, font=("Arial", 12), bg="white", fg="black").place(x=50, y=y_position)
-        tk.Entry(self, textvariable=text_variable, font=("Arial", 12)).place(x=250, y=y_position, width=300, height=30)
+        tk.Label(
+            self,
+            text=label_text,
+            font=("Arial", 12),
+            bg=self.theme["bg"],
+            fg=self.theme["fg"],
+        ).place(x=50, y=y_position)
+        tk.Entry(
+            self,
+            textvariable=text_variable,
+            font=("Arial", 12),
+            bg=self.theme["entry_bg"],
+            fg=self.theme["entry_fg"],
+            insertbackground=self.theme["entry_fg"],
+            relief="flat",
+        ).place(x=250, y=y_position, width=300, height=30)
 
     def select_date(self):
         """
@@ -295,10 +454,35 @@ class InvoiceGeneratorApp(tk.Tk):
                 None
         """
         top = tk.Toplevel(self)
+        self.date_window = top
         top.geometry("400x400")
+        top.configure(bg=self.theme["bg"])
+
+        def on_close_date_window():
+            self.date_window = None
+            top.destroy()
+
+        top.protocol("WM_DELETE_WINDOW", on_close_date_window)
 
         today = datetime.date.today()
-        cal = Calendar(top, selectmode='day', year=today.year, month=today.month, day=today.day)
+        cal = Calendar(
+            top,
+            selectmode='day',
+            year=today.year,
+            month=today.month,
+            day=today.day,
+            background=self.theme["panel_bg"],
+            foreground=self.theme["fg"],
+            headersbackground=self.theme["entry_bg"],
+            headersforeground=self.theme["fg"],
+            normalbackground=self.theme["panel_bg"],
+            normalforeground=self.theme["fg"],
+            weekendbackground=self.theme["entry_bg"],
+            weekendforeground=self.theme["fg"],
+            selectbackground=self.theme["accent_bg"],
+            selectforeground=self.theme["accent_fg"],
+            bordercolor=self.theme["border"],
+        )
         cal.pack(pady=20)
 
         def set_date():
@@ -309,9 +493,21 @@ class InvoiceGeneratorApp(tk.Tk):
 
             # adjust due date
             self.due_date = (date_adj + timedelta(days=15)).strftime("%d %B %Y")
+            self.date_window = None
             top.destroy()
 
-        tk.Button(top, text="Set Date", command=set_date).pack(pady=20)
+        set_date_button = tk.Button(
+            top,
+            text="Set Date",
+            command=set_date,
+            bg=self.theme["button_bg"],
+            fg=self.theme["button_fg"],
+            activebackground=self.theme["accent_bg"],
+            activeforeground=self.theme["accent_fg"],
+            relief="flat",
+        )
+        set_date_button.theme_role = "default"
+        set_date_button.pack(pady=20)
 
     def open_line_item_window(self):
         """
@@ -333,14 +529,14 @@ class InvoiceGeneratorApp(tk.Tk):
         self.line_item_window = tk.Toplevel(self)
         self.line_item_window.title("Line Items")
         self.line_item_window.geometry("800x600")
-        self.line_item_window.configure(bg='white')
+        self.line_item_window.configure(bg=self.theme["bg"])
         self.line_item_window.protocol("WM_DELETE_WINDOW", self.close_line_item_window)
 
         # create labels for line items
-        tk.Label(self.line_item_window, text="Date", font=("Arial", 12), bg="white").grid(row=0, column=0, padx=10, pady=10)
-        tk.Label(self.line_item_window, text="Description", font=("Arial", 12), bg="white").grid(row=0, column=1, padx=10, pady=10)
-        tk.Label(self.line_item_window, text="Location", font=("Arial", 12), bg="white").grid(row=0, column=2, padx=10, pady=10)
-        tk.Label(self.line_item_window, text="Rate", font=("Arial", 12), bg="white").grid(row=0, column=3, padx=10, pady=10)
+        tk.Label(self.line_item_window, text="Date", font=("Arial", 12), bg=self.theme["bg"], fg=self.theme["fg"]).grid(row=0, column=0, padx=10, pady=10)
+        tk.Label(self.line_item_window, text="Description", font=("Arial", 12), bg=self.theme["bg"], fg=self.theme["fg"]).grid(row=0, column=1, padx=10, pady=10)
+        tk.Label(self.line_item_window, text="Location", font=("Arial", 12), bg=self.theme["bg"], fg=self.theme["fg"]).grid(row=0, column=2, padx=10, pady=10)
+        tk.Label(self.line_item_window, text="Rate", font=("Arial", 12), bg=self.theme["bg"], fg=self.theme["fg"]).grid(row=0, column=3, padx=10, pady=10)
 
         if self.line_items:
             for row_index, item in enumerate(self.line_items, start=1):
@@ -351,7 +547,19 @@ class InvoiceGeneratorApp(tk.Tk):
             self.add_line_item_row()
 
         # button to add new line item row
-        tk.Button(self.line_item_window, text="+ Add Line", command=self.add_line_item_row, font=("Arial", 12), bg="black", fg="white").grid(row=999, column=0, columnspan=4, pady=20)
+        add_line_button = tk.Button(
+            self.line_item_window,
+            text="+ Add Line",
+            command=self.add_line_item_row,
+            font=("Arial", 12),
+            bg=self.theme["button_bg"],
+            fg=self.theme["button_fg"],
+            activebackground=self.theme["accent_bg"],
+            activeforeground=self.theme["accent_fg"],
+            relief="flat",
+        )
+        add_line_button.theme_role = "default"
+        add_line_button.grid(row=999, column=0, columnspan=4, pady=20)
 
     def add_line_item_row(self):
         """
@@ -384,10 +592,46 @@ class InvoiceGeneratorApp(tk.Tk):
             return
 
         # create entry widgets for each line item
-        tk.Entry(self.line_item_window, textvariable=date, font=("Arial", 12), width=15).grid(row=row_index, column=0, padx=10, pady=10)
-        tk.Entry(self.line_item_window, textvariable=description, font=("Arial", 12), width=30).grid(row=row_index, column=1, padx=10, pady=10)
-        tk.Entry(self.line_item_window, textvariable=location, font=("Arial", 12), width=20).grid(row=row_index, column=2, padx=10, pady=10)
-        tk.Entry(self.line_item_window, textvariable=rate, font=("Arial", 12), width=10).grid(row=row_index, column=3, padx=10, pady=10)
+        tk.Entry(
+            self.line_item_window,
+            textvariable=date,
+            font=("Arial", 12),
+            width=15,
+            bg=self.theme["entry_bg"],
+            fg=self.theme["entry_fg"],
+            insertbackground=self.theme["entry_fg"],
+            relief="flat",
+        ).grid(row=row_index, column=0, padx=10, pady=10)
+        tk.Entry(
+            self.line_item_window,
+            textvariable=description,
+            font=("Arial", 12),
+            width=30,
+            bg=self.theme["entry_bg"],
+            fg=self.theme["entry_fg"],
+            insertbackground=self.theme["entry_fg"],
+            relief="flat",
+        ).grid(row=row_index, column=1, padx=10, pady=10)
+        tk.Entry(
+            self.line_item_window,
+            textvariable=location,
+            font=("Arial", 12),
+            width=20,
+            bg=self.theme["entry_bg"],
+            fg=self.theme["entry_fg"],
+            insertbackground=self.theme["entry_fg"],
+            relief="flat",
+        ).grid(row=row_index, column=2, padx=10, pady=10)
+        tk.Entry(
+            self.line_item_window,
+            textvariable=rate,
+            font=("Arial", 12),
+            width=10,
+            bg=self.theme["entry_bg"],
+            fg=self.theme["entry_fg"],
+            insertbackground=self.theme["entry_fg"],
+            relief="flat",
+        ).grid(row=row_index, column=3, padx=10, pady=10)
 
     def cache_line_items_progress(self):
         """Persist current line-item values in memory for later editing."""
@@ -499,13 +743,38 @@ class InvoiceGeneratorApp(tk.Tk):
     def open_drafts_manager(self):
         """Open draft manager window for loading and deleting drafts."""
         manager = tk.Toplevel(self)
+        self.drafts_manager_window = manager
         manager.title("Drafts")
         manager.geometry("500x400")
-        manager.configure(bg="white")
+        manager.configure(bg=self.theme["bg"])
 
-        tk.Label(manager, text="Saved Drafts", font=("Arial", 14, "bold"), bg="white", fg="black").pack(pady=10)
+        def on_close_drafts_manager():
+            self.drafts_manager_window = None
+            manager.destroy()
 
-        listbox = tk.Listbox(manager, font=("Arial", 11), width=60, height=12)
+        manager.protocol("WM_DELETE_WINDOW", on_close_drafts_manager)
+
+        tk.Label(
+            manager,
+            text="Saved Drafts",
+            font=("Arial", 14, "bold"),
+            bg=self.theme["bg"],
+            fg=self.theme["fg"],
+        ).pack(pady=10)
+
+        listbox = tk.Listbox(
+            manager,
+            font=("Arial", 11),
+            width=60,
+            height=12,
+            bg=self.theme["panel_bg"],
+            fg=self.theme["fg"],
+            selectbackground=self.theme["accent_bg"],
+            selectforeground=self.theme["accent_fg"],
+            relief="flat",
+            highlightthickness=1,
+            highlightbackground=self.theme["border"],
+        )
         listbox.pack(padx=10, pady=10)
 
         draft_names = []
@@ -552,12 +821,50 @@ class InvoiceGeneratorApp(tk.Tk):
             if self.delete_draft(selected_name):
                 refresh_drafts_list()
 
-        button_row = tk.Frame(manager, bg="white")
+        button_row = tk.Frame(manager, bg=self.theme["bg"])
         button_row.pack(pady=10)
 
-        tk.Button(button_row, text="Load", command=load_selected_draft, width=12, bg="#333333", fg="white").grid(row=0, column=0, padx=5)
-        tk.Button(button_row, text="Delete", command=delete_selected_draft, width=12, bg="#7a1f1f", fg="white").grid(row=0, column=1, padx=5)
-        tk.Button(button_row, text="Refresh", command=refresh_drafts_list, width=12, bg="#555555", fg="white").grid(row=0, column=2, padx=5)
+        load_button = tk.Button(
+            button_row,
+            text="Load",
+            command=load_selected_draft,
+            width=12,
+            bg=self.theme["button_bg"],
+            fg=self.theme["button_fg"],
+            activebackground=self.theme["accent_bg"],
+            activeforeground=self.theme["accent_fg"],
+            relief="flat",
+        )
+        load_button.theme_role = "default"
+        load_button.grid(row=0, column=0, padx=5)
+
+        delete_button = tk.Button(
+            button_row,
+            text="Delete",
+            command=delete_selected_draft,
+            width=12,
+            bg=self.theme["danger_bg"],
+            fg=self.theme["button_fg"],
+            activebackground=self.theme["danger_active_bg"],
+            activeforeground=self.theme["button_fg"],
+            relief="flat",
+        )
+        delete_button.theme_role = "danger"
+        delete_button.grid(row=0, column=1, padx=5)
+
+        refresh_button = tk.Button(
+            button_row,
+            text="Refresh",
+            command=refresh_drafts_list,
+            width=12,
+            bg=self.theme["button_bg"],
+            fg=self.theme["button_fg"],
+            activebackground=self.theme["accent_bg"],
+            activeforeground=self.theme["accent_fg"],
+            relief="flat",
+        )
+        refresh_button.theme_role = "default"
+        refresh_button.grid(row=0, column=2, padx=5)
 
         refresh_drafts_list()
 
@@ -844,9 +1151,154 @@ class InvoiceGeneratorApp(tk.Tk):
                         "INSERT INTO app_state (key, value) VALUES (?, ?)",
                         (INVOICE_COUNTER_KEY, legacy_value),
                     )
+
+                theme_row = conn.execute(
+                    "SELECT value FROM app_state WHERE key = ?",
+                    (THEME_MODE_KEY,),
+                ).fetchone()
+                if theme_row is None:
+                    conn.execute(
+                        "INSERT INTO app_state (key, value) VALUES (?, ?)",
+                        (THEME_MODE_KEY, 1),
+                    )
+
                     conn.commit()
         except sqlite3.Error as exc:
             messagebox.showerror("Error", f"Failed to initialize invoice counter database: {exc}")
+
+    def get_saved_theme_mode(self):
+        """Get persisted theme mode; defaults to dark on missing or invalid values."""
+        try:
+            with sqlite3.connect(INVOICE_COUNTER_DB) as conn:
+                row = conn.execute(
+                    "SELECT value FROM app_state WHERE key = ?",
+                    (THEME_MODE_KEY,),
+                ).fetchone()
+                if row is None:
+                    return "dark"
+
+                parsed = str(row[0]).strip().lower()
+                if parsed in {"0", "light"}:
+                    return "light"
+                return "dark"
+        except sqlite3.Error:
+            return "dark"
+
+    def save_theme_mode(self, mode):
+        """Persist current theme mode to SQLite app state."""
+        value = 1 if mode == "dark" else 0
+        try:
+            with sqlite3.connect(INVOICE_COUNTER_DB) as conn:
+                conn.execute(
+                    """
+                    INSERT INTO app_state (key, value)
+                    VALUES (?, ?)
+                    ON CONFLICT(key) DO UPDATE SET value = excluded.value
+                    """,
+                    (THEME_MODE_KEY, value),
+                )
+                conn.commit()
+        except sqlite3.Error as exc:
+            messagebox.showerror("Error", f"Failed to save theme preference: {exc}")
+
+    def refresh_theme_toggle_icon(self):
+        """Show moon in light mode and sun in dark mode as toggle hint."""
+        self.theme_toggle_var.set("☀" if self.theme_mode == "dark" else "☾")
+
+    def toggle_theme(self):
+        """Switch between dark and light themes and persist selection."""
+        next_mode = "light" if self.theme_mode == "dark" else "dark"
+        self.apply_theme(next_mode, persist=True)
+
+    def apply_theme(self, mode, persist=False):
+        """Apply theme palette to existing widgets and open windows."""
+        self.theme_mode = mode if mode in self.themes else "dark"
+        self.theme = self.themes[self.theme_mode]
+        self._apply_theme_to_window(self)
+
+        for window_ref in (self.line_item_window, self.drafts_manager_window, self.date_window):
+            if window_ref is not None and window_ref.winfo_exists():
+                self._apply_theme_to_window(window_ref)
+
+        self.refresh_theme_toggle_icon()
+        if persist:
+            self.save_theme_mode(self.theme_mode)
+
+    def _apply_button_theme(self, button_widget):
+        """Apply themed button colors, honoring special roles."""
+        role = getattr(button_widget, "theme_role", "default")
+        button_bg = self.theme["button_bg"]
+        button_fg = self.theme["button_fg"]
+        active_bg = self.theme["accent_bg"]
+        active_fg = self.theme["accent_fg"]
+
+        if role == "accent":
+            button_bg = self.theme["accent_bg"]
+            button_fg = self.theme["accent_fg"]
+            active_bg = self.theme["accent_active_bg"]
+            active_fg = self.theme["accent_fg"]
+        elif role == "danger":
+            button_bg = self.theme["danger_bg"]
+            button_fg = self.theme["button_fg"]
+            active_bg = self.theme["danger_active_bg"]
+            active_fg = self.theme["button_fg"]
+
+        button_widget.configure(
+            bg=button_bg,
+            fg=button_fg,
+            activebackground=active_bg,
+            activeforeground=active_fg,
+        )
+
+    def _apply_theme_to_window(self, root_widget):
+        """Recursively apply current theme to widgets in a window."""
+        root_widget.configure(bg=self.theme["bg"])
+
+        def walk(widget):
+            class_name = widget.winfo_class()
+
+            try:
+                if isinstance(widget, Calendar):
+                    widget.configure(
+                        background=self.theme["panel_bg"],
+                        foreground=self.theme["fg"],
+                        headersbackground=self.theme["entry_bg"],
+                        headersforeground=self.theme["fg"],
+                        normalbackground=self.theme["panel_bg"],
+                        normalforeground=self.theme["fg"],
+                        weekendbackground=self.theme["entry_bg"],
+                        weekendforeground=self.theme["fg"],
+                        selectbackground=self.theme["accent_bg"],
+                        selectforeground=self.theme["accent_fg"],
+                        bordercolor=self.theme["border"],
+                    )
+                elif class_name in {"Tk", "Toplevel", "Frame"}:
+                    widget.configure(bg=self.theme["bg"])
+                elif class_name == "Label":
+                    widget.configure(bg=self.theme["bg"], fg=self.theme["fg"])
+                elif class_name == "Entry":
+                    widget.configure(
+                        bg=self.theme["entry_bg"],
+                        fg=self.theme["entry_fg"],
+                        insertbackground=self.theme["entry_fg"],
+                    )
+                elif class_name == "Button":
+                    self._apply_button_theme(widget)
+                elif class_name == "Listbox":
+                    widget.configure(
+                        bg=self.theme["panel_bg"],
+                        fg=self.theme["fg"],
+                        selectbackground=self.theme["accent_bg"],
+                        selectforeground=self.theme["accent_fg"],
+                        highlightbackground=self.theme["border"],
+                    )
+            except tk.TclError:
+                pass
+
+            for child in widget.winfo_children():
+                walk(child)
+
+        walk(root_widget)
 
     def _read_legacy_invoice_number(self):
         """Read legacy invoice_number.txt value for one-time migration."""
