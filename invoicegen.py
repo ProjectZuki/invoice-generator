@@ -16,6 +16,7 @@ Attributes:
     customer_address (tk.StringVar): The address of the customer.
     customer_city (tk.StringVar): The city of the customer.
     date (tk.StringVar): The date of the invoice.
+    due_date (tk.StringVar): The due date of the invoice.
     authorized_signatory (str): The authorized signatory of the company.
     line_items (list): A list of line items, each containing the date, description, location, and rate.
 Methods:
@@ -138,7 +139,7 @@ class InvoiceGeneratorApp(tk.Tk):
         # set current date
         today = datetime.date.today()
         self.date = tk.StringVar(value=today.strftime("%d %B %Y"))
-        self.due_date = (today + timedelta(days=15)).strftime("%d %B %Y")
+        self.due_date = tk.StringVar(value=(today + timedelta(days=15)).strftime("%d %B %Y"))
 
         # assume authorized signatory is the company name (self)
         self.authorized_signatory = self.company_name
@@ -225,6 +226,7 @@ class InvoiceGeneratorApp(tk.Tk):
             "Company Name": self.company_name.get().strip(),
             "Address": self.address.get().strip(),
             "City": self.city_st_zip.get().strip(),
+            "Due Date": self.due_date.get().strip(),
             "Date": self.date.get().strip(),
             "Customer Name": self.customer_name.get().strip(),
             "Phone No": self.phone_no.get().strip(),
@@ -329,14 +331,42 @@ class InvoiceGeneratorApp(tk.Tk):
         # client details
         tk.Label(
             self,
-            text="Date",
+            text="Invoice Date",
+            font=("Arial", 12),
+            bg=self.theme["bg"],
+            fg=self.theme["fg"],
+        ).place(x=50, y=260)
+        tk.Entry(
+            self,
+            textvariable=self.date,
+            font=("Arial", 12),
+            bg=self.theme["entry_bg"],
+            fg=self.theme["entry_fg"],
+            insertbackground=self.theme["entry_fg"],
+            relief="flat",
+        ).place(x=250, y=260, width=300, height=30)
+        tk.Button(
+            self,
+            text="Select Date",
+            font=("Arial", 12),
+            command=lambda: self.select_date(self.date),
+            bg=self.theme["button_bg"],
+            fg=self.theme["button_fg"],
+            activebackground=self.theme["accent_bg"],
+            activeforeground=self.theme["accent_fg"],
+            relief="flat",
+        ).place(x=570, y=260)
+
+        tk.Label(
+            self,
+            text="Due Date",
             font=("Arial", 12),
             bg=self.theme["bg"],
             fg=self.theme["fg"],
         ).place(x=50, y=320)
         tk.Entry(
             self,
-            textvariable=self.date,
+            textvariable=self.due_date,
             font=("Arial", 12),
             bg=self.theme["entry_bg"],
             fg=self.theme["entry_fg"],
@@ -347,7 +377,7 @@ class InvoiceGeneratorApp(tk.Tk):
             self,
             text="Select Date",
             font=("Arial", 12),
-            command=self.select_date,
+            command=lambda: self.select_date(self.due_date),
             bg=self.theme["button_bg"],
             fg=self.theme["button_fg"],
             activebackground=self.theme["accent_bg"],
@@ -444,7 +474,7 @@ class InvoiceGeneratorApp(tk.Tk):
             relief="flat",
         ).place(x=250, y=y_position, width=300, height=30)
 
-    def select_date(self):
+    def select_date(self, target_date_var):
         """
             Opens calendar window for selecting a date.
         
@@ -486,13 +516,9 @@ class InvoiceGeneratorApp(tk.Tk):
         cal.pack(pady=20)
 
         def set_date():
-            # set invoice date
             date_str = cal.get_date()
             date_adj = datetime.datetime.strptime(date_str, "%m/%d/%y")
-            self.date.set(date_adj.strftime("%d %B %Y"))
-
-            # adjust due date
-            self.due_date = (date_adj + timedelta(days=15)).strftime("%d %B %Y")
+            target_date_var.set(date_adj.strftime("%d %B %Y"))
             self.date_window = None
             top.destroy()
 
@@ -708,7 +734,7 @@ class InvoiceGeneratorApp(tk.Tk):
             "customer_address": self.customer_address.get().strip(),
             "customer_city": self.customer_city.get().strip(),
             "date": self.date.get().strip(),
-            "due_date": self.due_date,
+            "due_date": self.due_date.get().strip(),
             "authorized_signatory": self.authorized_signatory.get().strip(),
             "line_items": [
                 {
@@ -912,7 +938,7 @@ class InvoiceGeneratorApp(tk.Tk):
         self.customer_address.set(payload.get("customer_address", ""))
         self.customer_city.set(payload.get("customer_city", ""))
         self.date.set(payload.get("date", ""))
-        self.due_date = payload.get("due_date", self.due_date)
+        self.due_date.set(payload.get("due_date", self.due_date.get()))
         self.authorized_signatory.set(payload.get("authorized_signatory", ""))
 
         self.line_items = []
@@ -1015,7 +1041,8 @@ class InvoiceGeneratorApp(tk.Tk):
         inv_canvas.setFont("Helvetica-Bold", 10)
         inv_canvas.drawRightString(width - 2 * cm, height - 5 * cm, f"Invoice No.: {invoice_number}")
         inv_canvas.setFont("Helvetica", 10)
-        inv_canvas.drawRightString(width - 2 * cm, height - 5.5 * cm, f"{self.date.get()}")
+        inv_canvas.drawRightString(width - 2 * cm, height - 5.5 * cm, f"Due Date: {self.due_date.get()}")
+        inv_canvas.drawRightString(width - 2 * cm, height - 6 * cm, f"Invoice Date: {self.date.get()}")
 
         # client Information
         inv_canvas.setFont("Helvetica-Bold", 10)
@@ -1076,12 +1103,6 @@ class InvoiceGeneratorApp(tk.Tk):
 
         inv_canvas.setStrokeColorRGB(0.8, 0.8, 0.8)
         inv_canvas.line(width - 8 * cm, y_position - 1.5 * cm, width - 2 * cm, y_position - 1.5 * cm)
-
-        inv_canvas.setFont("Helvetica", 10)
-        inv_canvas.setFont("Helvetica-Bold", 10)
-        inv_canvas.drawRightString(width - 5.7 * cm, y_position - 2 * cm, "Due Date:")
-        inv_canvas.setFont("Helvetica", 10)
-        inv_canvas.drawRightString(width - 2.5 * cm, y_position - 2 * cm, f"{self.due_date}")
 
         # signature
         inv_canvas.drawRightString(width - 2 * cm, 2 * cm, f"Authorized Signatory: "+ self.authorized_signatory.get())
