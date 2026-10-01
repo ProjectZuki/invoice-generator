@@ -19,13 +19,22 @@ _**Solely because I hate paying for QuickBooks.**_
 
 ## Features
 
-- **Company Information**: Input company name, logo, address, and details
-- **Customer Information**: Client details such as name, address, and phone number.
-- **Date Selection**: Utilizes calendar widget for date input (if different from default current date).
-- **Line Items**: Add multiple line items with details for date, description, location, and rate.
-- **Draft Management**: Save invoice drafts, load saved drafts, and delete drafts from the draft manager.
-- **Default Values**: Predefined company and customer information to save time, see step 4 of [Installation](#installation).
-- **Customization**: Company log utilized is located in `files/companyimage.png`.
+- **Modern themed UI**: A responsive `ttk` interface with card-based sections, a sticky
+  header (invoice number badge) and footer, plus a persistent dark/light theme toggle.
+- **Company & Customer Information**: All contact fields — including company email and the
+  customer's email, address, and city — are now editable directly in the app (previously
+  config-only). An optional logo preview is shown when [Pillow](https://python-pillow.org/)
+  is installed.
+- **Inline Line Items**: Add, edit, and remove line items right in the main window with a
+  per-row calendar date picker and a remove button — no separate window required.
+- **Live Total**: The running total updates in real time in the footer as you type, and money
+  fields are validated as you go.
+- **Editable Invoice Number**: The header shows the next invoice number by default, but you can
+  type any number to override it. Leave it blank to use the next number in sequence.
+- **Date Selection**: Calendar widget for picking the invoice date, due date, or any line-item date.
+- **Draft Management**: Save, load, and delete drafts from a Treeview-based drafts manager
+  (double-click a draft to load it).
+- **Default Values**: Predefined company and customer information to save time, see step 3 of [Installation](#installation).
 - **Invoice Number Tracking**: Uses SQLite-backed persistent counters with one-time migration from `invoice_number.txt`.
 - **A4 PDF Format**: PDFs are created in standard A4 ~~wagyu steak~~ PDF format.
 
@@ -35,6 +44,7 @@ _**Solely because I hate paying for QuickBooks.**_
 - Tkinter
 - tkcalendar
 - ReportLab
+- Pillow (optional — enables the in-app logo preview)
 
 ## Installation
 
@@ -57,14 +67,17 @@ python invoicegen.py
 
 ## Usage
 1. Launch the application using `python invoicegen.py`
-2. Input company and client information (using config.txt file). The information should be pre-loaded but open to modification.
+2. Input company and client information (pre-loaded from `config.txt`, but fully editable in the UI).
 3. Add line items:
-    - To add line items, click `+ Add Line` button to add line items to the invoice. When finished, click `Generate Invoice`.
-    - Closing the line item window automatically keeps your current line item state in memory so you can return without recreating rows.
-4. Use `Save Draft` to save in-progress invoice data and `Manage Drafts` to load or delete drafts.
-5. After filling the required information, clicking `Generate Invoice` will generate an A4 PDF invoice
-saved to the directory `invoices/`
-6. The invoice will automatically open for viewing.
+    - Click `＋ Add Line` to add a row directly in the **Line Items** card, and `✕` to remove one.
+    - Use the 📅 button on any row to pick a date. The footer total updates live as you type.
+4. Optionally change the **Invoice #** in the header. It defaults to the next number in sequence;
+   leave it blank to keep that default, or type a specific number to override it.
+5. Use `Save Draft` to save in-progress invoice data and `Manage Drafts` to load or delete drafts
+   (double-click a draft to load it).
+6. After filling the required information, clicking `Generate Invoice` will generate an A4 PDF invoice
+saved to the directory `invoices/`. The app stays open so you can issue more invoices.
+7. The invoice will automatically open for viewing.
 
 ## File Structure
 
